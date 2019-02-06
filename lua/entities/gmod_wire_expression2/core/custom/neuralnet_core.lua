@@ -159,8 +159,8 @@ end
 function Matrix:Transpose (m) 
     local new = Matrix:create(m.cols, m.rows)
 
-    for i = 1,m.rows do
-        for j = 1,m.cols do
+    for i = 1,new.rows do
+        for j = 1,new.cols do
             new.data[i][j] = m.data[j][i]
         end
     end
@@ -176,7 +176,63 @@ function Matrix:map (func)
     end
 end
 
-Sigmoid = {
+function Matrix:MapMatrix (m, func) 
+    local new = Matrix:create(m.rows, m.cols)
+
+    for i = 1,new.rows do
+        for j = 1,new.cols do
+            new.data[i][j] = func(m.data[i][j])
+        end
+    end
+
+    return new
+end
+
+local DEFAULT = {n={},ntypes={},s={},stypes={},size=0}
+
+function Matrix:toTable()  
+    local ret = table.Copy(DEFAULT)
+
+    ret.s["cols"] = self.cols
+    ret.stypes["cols"] = "n"  
+    ret.s["rows"] = self.rows
+    ret.stypes["rows"] = "n"  
+    ret.s["data"] = table.Copy(DEFAULT)
+    ret.stypes["data"] = "t"  
+
+    local data = ret.s["data"]
+
+    for k,v in pairs(self.data) do
+        data.s[k] = table.Copy(DEFAULT)
+        data.stypes[k] = "t"   
+
+        local datarow = data.s[k]
+        local row = self.data[k]
+    
+        for i,j in pairs(row) do
+            datarow.s[i] = j
+            datarow.stypes[i] = "n"         
+        end  
+    end   
+
+    return ret
+end
+
+function Matrix:FromTable(t)
+    local ret = Matrix:create(t.s["rows"],t.s["cols"])
+
+    for i = 1,ret.rows do
+        for j = 1,ret.cols do
+            ret.data[i][j] = t.s["data"].s[i].s[j]
+        end
+    end
+
+    return ret
+end
+
+ActivationFunctions = {}
+
+ActivationFunctions.Sigmoid = {
     Name = "Sigmoid",
     Equation = function (x) 
         return 1 / (1 + math.exp(-x))
@@ -186,37 +242,53 @@ Sigmoid = {
     end,
 }
 
---------------------------------------------------------------------------------
-__e2setcost(2)
+ActivationFunctions.Tanh = {
+    Name = "Tanh",
+    Equation = function (x) 
+        return math.tanh(x)
+    end,
+    Derivative = function (x) 
+        return 1 - (x * x)
+    end,
+}
 
-e2function neuralnet createNeuralNetwork(...)
-    local args = {...}
+function GetActivationFunction (name) 
+    for k,v in pairs(ActivationFunctions) do
+        if v.Name:lower() == name:lower() then
+            return v
+        end
+    end
 
+    error("Invalid activation function.")
+end
+
+NeuralNetwork = {}
+NeuralNetwork.__index = NeuralNetwork
+
+function NeuralNetwork:create (args) 
     if #args>=3 then
         local nn = {}
+        setmetatable(nn, NeuralNetwork)
 
         nn.Structure = args
         nn.Weights = {}
         nn.Bias = {}
+        nn.Iteration = 0
+        nn.LearningRate = 0.03
+        nn.ActivationFunction = ActivationFunctions.Sigmoid
 
         for i = 1,#args - 1 do
-            local v = args[i]
-
-            if not (type(v) == "number") then error("Expected number for layer.") end
+            if not (type(args[i]) == "number") then error("Expected number for layer.") end
             
             local weights = Matrix:create(nn.Structure[i + 1], nn.Structure[i])
             weights:Randomize()
 
-            nn.Weights[i] = weights
-
             local bias = Matrix:create(nn.Structure[i + 1], 1)
             bias:Randomize()
 
+            nn.Weights[i] = weights
             nn.Bias[i] = bias
         end
-
-        nn.LearningRate = 0.1
-        nn.ActivationFunction = Sigmoid
 
         return nn
     else
@@ -224,24 +296,226 @@ e2function neuralnet createNeuralNetwork(...)
     end
 end
 
-e2function array neuralnet:predict(array input) 
-    local matrix = Matrix:FromArray(input)      
+function NeuralNetwork:predict (args)
+    if #args ~= self.Structure[1] then
+        error("Input count must match node count of first layer.")
+    end
 
-    for i = 1,#this.Structure - 1 do     
-        local matrixNext = Matrix:MultiplyMatrices(this.Weights[i],matrix)             
+    for k,v in pairs(args) do
+        if not (type(v) == "number") then error("Expected number.") end
+    end
+
+    local matrix = Matrix:FromArray(args)      
+
+    for i = 1,#self.Structure - 1 do     
+        local matrixNext = Matrix:MultiplyMatrices(self.Weights[i],matrix)             
         
-        matrixNext:addMatrix(this.Bias[i])
-        matrixNext:map(this.ActivationFunction.Equation)
+        matrixNext:addMatrix(self.Bias[i])
+        matrixNext:map(self.ActivationFunction.Equation)
 
         matrix = matrixNext
     end  
 
-    return matrix:toArray()
+    return matrix:toArray()   
 end
 
--- e2function string toString(neuralnet nn)
---     return "Gay"
--- end
+function NeuralNetwork:train (args, target)
+    if #args ~= self.Structure[1] then
+        error("Input count must match node count of the first layer.")
+    end
 
--- --- Gets the vector nicely formatted as a string "[X,Y,Z]"
--- e2function string neuralnet:toString() = e2function string toString(neuralnet v)
+    if #target ~= self.Structure[#self.Structure] then
+        error("Target count must match node count of the last layer.")
+    end
+
+    for k,v in pairs(args) do if not (type(v) == "number") then error("Input and target arrays may only contain numbers.") end end
+    for k,v in pairs(target) do if not (type(v) == "number") then error("Input and target arrays may only contain numbers.") end end
+    
+    local layers = {}
+    layers[1] = Matrix:FromArray(args)
+
+    for i = 2, #self.Structure do
+        layers[i] = Matrix:MultiplyMatrices(self.Weights[i - 1], layers[i - 1])
+        layers[i]:addMatrix(self.Bias[i-1])
+        layers[i]:map(self.ActivationFunction.Equation)
+    end
+
+    local error = Matrix:SubtractMatrices(Matrix:FromArray(target), layers[#layers])
+    local i = #self.Structure
+  
+    while i >= 2 do
+        local gradients = Matrix:MapMatrix(layers[i], self.ActivationFunction.Derivative) 
+        gradients:multiplyMatrix(error)
+        gradients:multiplyNumber(self.LearningRate)
+
+        local hiddenTranspose = Matrix:Transpose(layers[i - 1])
+        local deltas = Matrix:MultiplyMatrices(gradients, hiddenTranspose)
+
+        self.Weights[i - 1]:addMatrix(deltas)
+        self.Bias[i - 1]:addMatrix(gradients)
+
+        if i > 2 then
+            error = Matrix:MultiplyMatrices(Matrix:Transpose(self.Weights[i-1]), error)
+        end
+
+        i = i - 1
+    end
+
+    self.Iteration = self.Iteration + 1
+end
+
+--------------------------------------------------------------------------------
+__e2setcost(20)
+e2function neuralnet createNeuralNetwork(...)
+    return NeuralNetwork:create({...})
+end
+
+__e2setcost(20)
+e2function neuralnet createNeuralNetwork(neuralnet nn)
+    local ret = NeuralNetwork:create(nn.Structure)
+
+    ret.LearningRate = nn.LearningRate
+    ret.ActivationFunction = nn.ActivationFunction
+    ret.Iteration = nn.Iteration
+
+    for k,v in pairs(ret.Weights) do
+        for i = 1,v.rows do
+            for j = 1,v.cols do
+                v.data[i][j] = nn.Weights[k].data[i][j]
+            end
+        end 
+    end  
+
+    for k,v in pairs(ret.Bias) do
+        for i = 1,v.rows do
+            for j = 1,v.cols do
+                v.data[i][j] = nn.Bias[k].data[i][j]
+            end
+        end 
+    end  
+
+    return ret
+end
+
+__e2setcost(20)
+e2function table neuralnet:toTable()
+    if not this then return {} end
+
+    local ret = table.Copy(DEFAULT)
+
+    ret.s["Iteration"] = this.Iteration
+    ret.stypes["Iteration"] = "n"
+
+    ret.s["LearningRate"] = this.LearningRate
+    ret.stypes["LearningRate"] = "n"
+
+    ret.s["Activation"] = this.ActivationFunction.Name
+    ret.stypes["Activation"] = "s"
+
+    ret.s["Structure"] = this.Structure
+    ret.stypes["Structure"] = "r"
+
+    ret.s["Weights"] = table.Copy(DEFAULT)
+    ret.stypes["Weights"] = "t"
+
+    local weights = ret.s["Weights"] 
+
+    for k,v in pairs(this.Weights) do
+        weights.s[k] = v:toTable() 
+        weights.stypes[k] = "t"      
+    end   
+
+    ret.s["Bias"] = table.Copy(DEFAULT)
+    ret.stypes["Bias"] = "t"
+
+    local bias = ret.s["Bias"] 
+
+    for k,v in pairs(this.Bias) do
+        bias.s[k] = v:toTable() 
+        bias.stypes[k] = "t"      
+    end  
+
+    ret.size = #this
+    return ret
+end
+
+__e2setcost(20)
+e2function neuralnet createNeuralNetwork(table t)
+    local ret = NeuralNetwork:create(t.s["Structure"])
+
+    ret.ActivationFunction = GetActivationFunction(t.s["Activation"])
+    ret.LearningRate = t.s["LearningRate"]
+    ret.Iteration = t.s["Iteration"]
+
+    for k,v in pairs(ret.Weights) do
+        for i = 1,v.rows do
+            for j = 1,v.cols do
+                v.data[i][j] = t.s["Weights"].s[k].s["data"].s[i].s[j]
+            end
+        end 
+    end  
+
+    for k,v in pairs(ret.Bias) do
+        for i = 1,v.rows do
+            for j = 1,v.cols do
+                v.data[i][j] = t.s["Bias"].s[k].s["data"].s[i].s[j]
+            end
+        end 
+    end  
+
+    return ret
+end
+
+__e2setcost(1)
+e2function number neuralnet:iteration() 
+    if next(this) == nil then
+        error("Neuralnetwork is empty.")
+    end
+
+    return this.Iteration
+end
+
+e2function void neuralnet:print() 
+    PrintTable(this)
+end
+
+__e2setcost(1)
+e2function void neuralnet:setLearningRate(number n) 
+    if next(this) == nil then
+        error("Neuralnetwork is empty.")
+    end
+
+    this.LearningRate = n
+end
+
+__e2setcost(1)
+e2function void neuralnet:setActivationFunction(string name) 
+    if next(this) == nil then
+        error("Neuralnetwork is empty.")
+    end
+
+    this.ActivationFunction = GetActivationFunction(name)
+end
+
+__e2setcost(25)
+e2function array neuralnet:predict(array input) 
+    if next(this) == nil then
+        error("Neuralnetwork is empty.")
+    end
+
+    return this:predict(input)
+end
+
+e2function array neuralnet:predict(...) 
+    return this:predict({...})
+end
+
+__e2setcost(100)
+
+e2function void neuralnet:train(array input, array target) 
+    if next(this) == nil then
+        error("Neuralnetwork is empty.")
+    end
+
+    this:train(input, target)
+end
