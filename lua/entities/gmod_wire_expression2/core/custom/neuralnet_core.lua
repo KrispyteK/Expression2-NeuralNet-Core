@@ -21,9 +21,6 @@ registerOperator("ass", "xnn", "xnn", function(self, args)
 	return rv2
 end)
 
---local cvar_equidistant = CreateConVar( "wire_expression2_curves_mindistance", "5", FCVAR_ARCHIVE )
---local cvar_maxsteps = CreateConVar( "wire_expression2_curves_maxsteps", "100", FCVAR_ARCHIVE )
-
 local cvar_maxiterations = CreateConVar( "wire_expression2_neuralnet_maxiterations", "25", FCVAR_ARCHIVE )
 
 --------------------------------------------------------------------------------
@@ -465,7 +462,7 @@ end
 
 __e2setcost(20)
 e2function table neuralnet:toTable()
-    if not this then return {} end
+    if not next(this) then return table.Copy(DEFAULT) end
 
     local ret = table.Copy(DEFAULT)
 
@@ -510,8 +507,6 @@ e2function table neuralnet:toTable()
 
     ret.size = #this
 
-    PrintTable(ret)
-
     return ret
 end
 
@@ -539,47 +534,45 @@ e2function neuralnet createNeuralNetwork(table t)
         end 
     end  
 
-    print(ret.Bias)
-
     return ret
 end
 
-__e2setcost(1)
+__e2setcost(5)
 e2function void neuralnet:setLearningRate(number n) 
-    if not this then return end
+    if not next(this) then return end
 
     this.LearningRate = n
 end
 
-__e2setcost(1)
+__e2setcost(5)
 e2function void neuralnet:setActivationFunction(string name) 
-    if not this then return end
+    if not next(this) then return end
 
     this.ActivationFunction = GetActivationFunction(name)
 end
 
 __e2setcost(25)
 e2function array neuralnet:predict(array input) 
-    if not this then return {} end
+    if not next(this) then return {} end
 
     return this:predict(input)
 end
 
 e2function array neuralnet:predict(...) 
-    if not this then return {} end
+    if not next(this) then return {} end
 
     return this:predict({...})
 end
 
 __e2setcost(100)
 e2function void neuralnet:train(array input, array target) 
-    if not this then return end
+    if not next(this) then return end
 
     this:train(input, target)
 end
 
 e2function void neuralnet:train(array input, array target, number iterations) 
-    if not this then return end
+    if not next(this) then return end
 
     local max =  math.min(iterations, cvar_maxiterations:GetInt())
 
@@ -589,31 +582,27 @@ e2function void neuralnet:train(array input, array target, number iterations)
     end
 end
 
-__e2setcost(1)
+__e2setcost(5)
 e2function number neuralnet:iteration() 
-    if not this then return 0 end
+    if not next(this) then return 0 end
 
     return this.Iteration
 end
 
 e2function number neuralnet:learningRate() 
-    if not this then return 0 end
+    if not next(this) then return 0 end
 
     return this.LearningRate
 end
 
 e2function string neuralnet:activationFunction() 
-    if not this then return 0 end
+    if not next(this) then return "" end
 
     return this.ActivationFunction.Name
 end
 
 e2function array neuralnet:structure() 
-    if not this then return 0 end
+    if not next(this) then return {} end
 
     return this.structure
-end
-
-e2function void neuralnet:print() 
-    PrintTable(this)
 end
