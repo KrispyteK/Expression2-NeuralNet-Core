@@ -305,8 +305,8 @@ ActivationFunctions.Sin = {
     end,
 }
 
-ActivationFunctions.Guassian = {
-    Name = "Guassian",
+ActivationFunctions.Gaussian = {
+    Name = "Gaussian",
     Equation = function (x) 
         return math.exp(-math.pow(x,2))
     end,
@@ -579,6 +579,18 @@ e2function void neuralnet:train(array input, array target, number iterations)
     for i = 1, max do
         self.prf = self.prf + 20 
         this:train(input, target)
+    end
+end
+
+__e2setcost(5)
+e2function void neuralnet:randomize() 
+    if not next(this) then return 0 end
+
+    this.Iteration = 0
+
+    for i = 1,#this.Structure - 1 do
+        this.Weights[i]:Randomize()
+        this.Bias[i]:Randomize()
     end
 end
 
