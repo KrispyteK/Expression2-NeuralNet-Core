@@ -24,6 +24,8 @@ end)
 --local cvar_equidistant = CreateConVar( "wire_expression2_curves_mindistance", "5", FCVAR_ARCHIVE )
 --local cvar_maxsteps = CreateConVar( "wire_expression2_curves_maxsteps", "100", FCVAR_ARCHIVE )
 
+local cvar_maxiterations = CreateConVar( "wire_expression2_neuralnet_maxiterations", "25", FCVAR_ARCHIVE )
+
 --------------------------------------------------------------------------------
 
 Matrix = {}
@@ -203,15 +205,15 @@ function Matrix:toTable()
     local data = ret.s["data"]
 
     for k,v in pairs(self.data) do
-        data.s[k] = table.Copy(DEFAULT)
-        data.stypes[k] = "t"   
+        data.n[k] = table.Copy(DEFAULT)
+        data.ntypes[k] = "t"   
 
-        local datarow = data.s[k]
+        local datarow = data.n[k]
         local row = self.data[k]
     
         for i,j in pairs(row) do
-            datarow.s[i] = j
-            datarow.stypes[i] = "n"         
+            datarow.n[i] = j
+            datarow.ntypes[i] = "n"         
         end  
     end   
 
@@ -223,11 +225,15 @@ function Matrix:FromTable(t)
 
     for i = 1,ret.rows do
         for j = 1,ret.cols do
-            ret.data[i][j] = t.s["data"].s[i].s[j]
+            ret.data[i][j] = t.s["data"].n[i].n[j]
         end
     end
 
     return ret
+end
+
+function ternary ( cond , T , F )
+    if cond then return T else return F end
 end
 
 ActivationFunctions = {}
@@ -242,6 +248,26 @@ ActivationFunctions.Sigmoid = {
     end,
 }
 
+ActivationFunctions.Softsign = {
+    Name = "Softsign",
+    Equation = function (x) 
+        return 1 / (1 + math.abs(x))
+    end,
+    Derivative = function (x) 
+        return math.pow(1 / (1 + math.abs(x)),2)
+    end,
+}
+
+ActivationFunctions.ArcTan = {
+    Name = "ArcTan",
+    Equation = function (x) 
+        return math.atan(x)
+    end,
+    Derivative = function (x) 
+        return 1 / (math.pow(x,2) + 1)
+    end,
+}
+
 ActivationFunctions.Tanh = {
     Name = "Tanh",
     Equation = function (x) 
@@ -249,6 +275,46 @@ ActivationFunctions.Tanh = {
     end,
     Derivative = function (x) 
         return 1 - (x * x)
+    end,
+}
+
+ActivationFunctions.ReLU = {
+    Name = "ReLU",
+    Equation = function (x) 
+        return ternary(x < 0, 0, x)
+    end,
+    Derivative = function (x) 
+        return ternary(x < 0, 0, 1)
+    end,
+}
+
+ActivationFunctions.ISRU = {
+    Name = "ISRU",
+    Equation = function (x) 
+        return x / math.sqrt(1 + math.pow(x,2))
+    end,
+    Derivative = function (x) 
+        return math.pow(x / math.sqrt(1 + math.pow(x,2)),3)
+    end,
+}
+
+ActivationFunctions.Sin = {
+    Name = "Sin",
+    Equation = function (x) 
+        return math.sin(x)
+    end,
+    Derivative = function (x) 
+        return math.cos(x)
+    end,
+}
+
+ActivationFunctions.Guassian = {
+    Name = "Guassian",
+    Equation = function (x) 
+        return math.exp(-math.pow(x,2))
+    end,
+    Derivative = function (x) 
+        return -2 * x * math.exp(-math.pow(x,2))
     end,
 }
 
@@ -412,8 +478,15 @@ e2function table neuralnet:toTable()
     ret.s["Activation"] = this.ActivationFunction.Name
     ret.stypes["Activation"] = "s"
 
-    ret.s["Structure"] = this.Structure
-    ret.stypes["Structure"] = "r"
+    ret.s["Structure"] = table.Copy(DEFAULT)
+    ret.stypes["Structure"] = "t"
+
+    local structure = ret.s["Structure"] 
+
+    for k,v in pairs(this.Structure) do
+        structure.n[k] = v
+        structure.ntypes[k] = "n"      
+    end   
 
     ret.s["Weights"] = table.Copy(DEFAULT)
     ret.stypes["Weights"] = "t"
@@ -421,8 +494,8 @@ e2function table neuralnet:toTable()
     local weights = ret.s["Weights"] 
 
     for k,v in pairs(this.Weights) do
-        weights.s[k] = v:toTable() 
-        weights.stypes[k] = "t"      
+        weights.n[k] = v:toTable() 
+        weights.ntypes[k] = "t"      
     end   
 
     ret.s["Bias"] = table.Copy(DEFAULT)
@@ -431,17 +504,20 @@ e2function table neuralnet:toTable()
     local bias = ret.s["Bias"] 
 
     for k,v in pairs(this.Bias) do
-        bias.s[k] = v:toTable() 
-        bias.stypes[k] = "t"      
+        bias.n[k] = v:toTable() 
+        bias.ntypes[k] = "t"      
     end  
 
     ret.size = #this
+
+    PrintTable(ret)
+
     return ret
 end
 
 __e2setcost(20)
 e2function neuralnet createNeuralNetwork(table t)
-    local ret = NeuralNetwork:create(t.s["Structure"])
+    local ret = NeuralNetwork:create(t.s["Structure"].n)
 
     ret.ActivationFunction = GetActivationFunction(t.s["Activation"])
     ret.LearningRate = t.s["LearningRate"]
@@ -450,7 +526,7 @@ e2function neuralnet createNeuralNetwork(table t)
     for k,v in pairs(ret.Weights) do
         for i = 1,v.rows do
             for j = 1,v.cols do
-                v.data[i][j] = t.s["Weights"].s[k].s["data"].s[i].s[j]
+                v.data[i][j] = t.s["Weights"].n[k].s["data"].n[i].n[j]
             end
         end 
     end  
@@ -458,64 +534,86 @@ e2function neuralnet createNeuralNetwork(table t)
     for k,v in pairs(ret.Bias) do
         for i = 1,v.rows do
             for j = 1,v.cols do
-                v.data[i][j] = t.s["Bias"].s[k].s["data"].s[i].s[j]
+                v.data[i][j] = t.s["Bias"].n[k].s["data"].n[i].n[j]
             end
         end 
     end  
+
+    print(ret.Bias)
 
     return ret
 end
 
 __e2setcost(1)
-e2function number neuralnet:iteration() 
-    if next(this) == nil then
-        error("Neuralnetwork is empty.")
-    end
-
-    return this.Iteration
-end
-
-e2function void neuralnet:print() 
-    PrintTable(this)
-end
-
-__e2setcost(1)
 e2function void neuralnet:setLearningRate(number n) 
-    if next(this) == nil then
-        error("Neuralnetwork is empty.")
-    end
+    if not this then return end
 
     this.LearningRate = n
 end
 
 __e2setcost(1)
 e2function void neuralnet:setActivationFunction(string name) 
-    if next(this) == nil then
-        error("Neuralnetwork is empty.")
-    end
+    if not this then return end
 
     this.ActivationFunction = GetActivationFunction(name)
 end
 
 __e2setcost(25)
 e2function array neuralnet:predict(array input) 
-    if next(this) == nil then
-        error("Neuralnetwork is empty.")
-    end
+    if not this then return {} end
 
     return this:predict(input)
 end
 
 e2function array neuralnet:predict(...) 
+    if not this then return {} end
+
     return this:predict({...})
 end
 
 __e2setcost(100)
-
 e2function void neuralnet:train(array input, array target) 
-    if next(this) == nil then
-        error("Neuralnetwork is empty.")
-    end
+    if not this then return end
 
     this:train(input, target)
+end
+
+e2function void neuralnet:train(array input, array target, number iterations) 
+    if not this then return end
+
+    local max =  math.min(iterations, cvar_maxiterations:GetInt())
+
+    for i = 1, max do
+        self.prf = self.prf + 20 
+        this:train(input, target)
+    end
+end
+
+__e2setcost(1)
+e2function number neuralnet:iteration() 
+    if not this then return 0 end
+
+    return this.Iteration
+end
+
+e2function number neuralnet:learningRate() 
+    if not this then return 0 end
+
+    return this.LearningRate
+end
+
+e2function string neuralnet:activationFunction() 
+    if not this then return 0 end
+
+    return this.ActivationFunction.Name
+end
+
+e2function array neuralnet:structure() 
+    if not this then return 0 end
+
+    return this.structure
+end
+
+e2function void neuralnet:print() 
+    PrintTable(this)
 end
